@@ -1,0 +1,8 @@
+workflow: slack-test
+trigger:
+  manual: true
+steps:
+  - action: notify_slack
+    input:
+      channel: "general"
+      message: "Hello from Automesh! This is a test workflow."

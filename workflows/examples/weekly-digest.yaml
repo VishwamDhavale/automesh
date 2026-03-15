@@ -1,0 +1,16 @@
+workflow: weekly_digest
+
+trigger:
+  schedule: "0 9 * * 1"
+
+steps:
+  - action: send_email
+    input:
+      to: "team@company.com"
+      subject: "Weekly Activity Digest"
+      body: "Here is your weekly summary of workflow executions."
+
+  - action: notify_slack
+    input:
+      channel: "#general"
+      message: "📊 Weekly digest has been sent!"

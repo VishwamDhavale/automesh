@@ -1,0 +1,24 @@
+FROM node:20-alpine AS base
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+# Copy workspace config
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY packages/shared-types/package.json ./packages/shared-types/
+COPY packages/workflow-engine/package.json ./packages/workflow-engine/
+COPY packages/integrations/package.json ./packages/integrations/
+COPY packages/action-plugins/package.json ./packages/action-plugins/
+COPY apps/api/package.json ./apps/api/
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy source
+COPY packages/ ./packages/
+COPY apps/api/ ./apps/api/
+
+WORKDIR /app/apps/api
+
+EXPOSE 4000
+CMD ["pnpm", "dev"]

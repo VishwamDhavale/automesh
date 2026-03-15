@@ -1,0 +1,30 @@
+workflow: order_processing
+
+trigger:
+  event: shopify.order_created
+
+conditions:
+  - order.total > 100
+
+steps:
+  - action: create_contact
+    id: customer
+    input:
+      email: "{{ event.data.email }}"
+      name: "{{ event.data.name }}"
+      company: "{{ event.data.company }}"
+
+  - action: send_email
+    id: invoice
+    input:
+      to: "{{ customer.email }}"
+      subject: "Order Confirmed - #{{ event.data.order_id }}"
+      body: "Your order has been confirmed. Total: ${{ event.data.total }}"
+    retry:
+      attempts: 3
+      delay: "10s"
+
+  - action: notify_slack
+    input:
+      channel: "#orders"
+      message: "📦 New order #{{ event.data.order_id }} from {{ customer.email }} - ${{ event.data.total }}"

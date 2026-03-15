@@ -1,0 +1,19 @@
+workflow: github_deploy_notify
+
+trigger:
+  event: github.push
+
+steps:
+  - action: notify_slack
+    input:
+      channel: "#deployments"
+      message: "🚀 New push to {{ event.data.repository.full_name }} by {{ event.data.pusher.name }}: {{ event.data.head_commit.message }}"
+
+  - action: send_email
+    input:
+      to: "devops@company.com"
+      subject: "Deployment Triggered"
+      body: "A new push was detected on {{ event.data.repository.full_name }}."
+    retry:
+      attempts: 2
+      delay: "5s"

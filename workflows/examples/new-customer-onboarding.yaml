@@ -1,0 +1,23 @@
+workflow: new_customer_onboarding
+
+trigger:
+  event: stripe.payment_intent_succeeded
+
+steps:
+  - action: create_contact
+    id: step1
+    input:
+      email: "{{ event.data.customer_email }}"
+      name: "{{ event.data.customer_name }}"
+
+  - action: send_email
+    id: step2
+    input:
+      to: "{{ step1.email }}"
+      subject: "Welcome to Our Platform!"
+      body: "Hi {{ step1.name }}, thank you for your purchase!"
+
+  - action: notify_slack
+    input:
+      channel: "#sales"
+      message: "🎉 New customer onboarded: {{ step1.email }}"

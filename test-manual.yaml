@@ -1,0 +1,8 @@
+workflow: manual-test
+trigger:
+  manual: true
+steps:
+  - action: create_contact
+    input:
+      name: "Test User"
+      email: "test@example.com"
