@@ -1,20 +1,31 @@
 import type { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../db/index.js';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, and, inArray } from 'drizzle-orm';
 import { getAdapter } from '@automesh/integrations';
 import type { EventRouter } from '@automesh/workflow-engine';
 import { workflowQueue } from '../queue/queue.js';
 
 export async function webhookRoutes(app: FastifyInstance, eventRouter?: EventRouter) {
   // Webhook ingestion endpoint
-  // POST /api/webhooks/:provider (e.g., /api/webhooks/stripe)
-  app.post('/api/webhooks/:provider', {
+  // POST /api/webhooks/:integrationId
+  app.post('/api/webhooks/:integrationId', {
     config: {
       rawBody: true,
     },
   }, async (request, reply) => {
-    const { provider } = request.params as { provider: string };
+    const { integrationId } = request.params as { integrationId: string };
+    
+    const [integration] = await db
+      .select()
+      .from(schema.integrations)
+      .where(eq(schema.integrations.id, integrationId));
+
+    if (!integration) {
+      return reply.status(404).send({ error: 'Integration not found' });
+    }
+
+    const provider = integration.provider;
     const adapter = getAdapter(provider);
 
     if (!adapter) {
@@ -28,15 +39,9 @@ export async function webhookRoutes(app: FastifyInstance, eventRouter?: EventRou
     // Verify webhook signature (if secret is configured in DB)
     let secret: string | undefined;
 
-    const [integration] = await db
-      .select()
-      .from(schema.integrations)
-      .where(eq(schema.integrations.provider, provider));
-
-    if (integration && integration.config) {
+    if (integration.config) {
       const config = integration.config as Record<string, string>;
       
-      // Determine the correct field name for the secret based on the provider
       if (provider === 'github') secret = config.webhookSecret;
       else if (provider === 'stripe') secret = config.webhookSecret;
       else if (provider === 'slack') secret = config.signingSecret;
@@ -80,7 +85,10 @@ export async function webhookRoutes(app: FastifyInstance, eventRouter?: EventRou
           .select({ id: schema.workflows.id })
           .from(schema.workflows)
           .where(
-            eq(schema.workflows.status, 'active')
+            and(
+              eq(schema.workflows.status, 'active'),
+              inArray(schema.workflows.id, workflowIds)
+            )
           );
         
         // Intersect matches with active workflows
@@ -89,9 +97,10 @@ export async function webhookRoutes(app: FastifyInstance, eventRouter?: EventRou
         );
 
         if (activeMatches.length > 0) {
-          // Store event only if it matched AT LEAST ONE ACTIVE workflow
-          await db.insert(schema.events).values({
+          // Store event and assign userId (SEC-02)
+          await (db.insert(schema.events) as any).values({
             id: normalizedEvent.id,
+            userId: integration.userId,
             source: normalizedEvent.source,
             eventType: normalizedEvent.type,
             payload: normalizedEvent.data,
@@ -110,8 +119,9 @@ export async function webhookRoutes(app: FastifyInstance, eventRouter?: EventRou
 
             const runId = `run_${nanoid()}`;
 
-            await db.insert(schema.workflowRuns).values({
+            await (db.insert(schema.workflowRuns) as any).values({
               id: runId,
+              userId: integration.userId,
               workflowId: matched.id,
               versionId: latestVersion.id,
               status: 'pending',

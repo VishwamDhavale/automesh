@@ -1,15 +1,17 @@
 import type { FastifyInstance } from 'fastify';
 import { db, schema } from '../db/index.js';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { INTEGRATIONS_REGISTRY } from '@automesh/shared-types';
 
 export async function integrationsRoutes(app: FastifyInstance) {
   // Get all configured integrations
-  app.get('/api/integrations', async (_request, reply) => {
+  app.get('/api/integrations', { onRequest: [(app as any).authenticate] }, async (request, reply) => {
+    const user = (request as any).user;
     const configured = await db
       .select()
-      .from(schema.integrations);
+      .from(schema.integrations)
+      .where(eq(schema.integrations.userId, user.sub));
 
     // Mask sensitive config values before sending to the client
     const masked = configured.map((d) => {
@@ -45,7 +47,8 @@ export async function integrationsRoutes(app: FastifyInstance) {
   });
 
   // Create or Update an integration config
-  app.post('/api/integrations', async (request, reply) => {
+  app.post('/api/integrations', { onRequest: [(app as any).authenticate] }, async (request, reply) => {
+    const user = (request as any).user;
     const body = request.body as { provider: string; config: Record<string, string> };
 
     if (!body.provider || !body.config) {
@@ -60,7 +63,7 @@ export async function integrationsRoutes(app: FastifyInstance) {
     const [existing] = await db
       .select()
       .from(schema.integrations)
-      .where(eq(schema.integrations.provider, body.provider));
+      .where(and(eq(schema.integrations.provider, body.provider), eq(schema.integrations.userId, user.sub)));
 
     if (existing) {
       // Merge new config. If a field comes in as '********', keep the old value.
@@ -78,15 +81,16 @@ export async function integrationsRoutes(app: FastifyInstance) {
         .set({
           config: newConfig,
           updatedAt: new Date(),
-        })
-        .where(eq(schema.integrations.provider, body.provider));
+        } as any)
+        .where(and(eq(schema.integrations.provider, body.provider), eq(schema.integrations.userId, user.sub)));
 
       return reply.send({ success: true, id: existing.id });
     } else {
       // Create new
       const id = `int_${nanoid()}`;
-      await db.insert(schema.integrations).values({
+      await (db.insert(schema.integrations) as any).values({
         id,
+        userId: user.sub,
         provider: body.provider,
         config: body.config,
       });
@@ -96,12 +100,13 @@ export async function integrationsRoutes(app: FastifyInstance) {
   });
 
   // Delete an integration config
-  app.delete('/api/integrations/:provider', async (request, reply) => {
+  app.delete('/api/integrations/:provider', { onRequest: [(app as any).authenticate] }, async (request, reply) => {
     const { provider } = request.params as { provider: string };
+    const user = (request as any).user;
 
     await db
       .delete(schema.integrations)
-      .where(eq(schema.integrations.provider, provider));
+      .where(and(eq(schema.integrations.provider, provider), eq(schema.integrations.userId, user.sub)));
 
     return reply.send({ deleted: true });
   });

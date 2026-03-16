@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import type { IntegrationDefinition } from "@automesh/shared-types";
+import { sanitizeHtml } from "../../lib/sanitize";
+import { api } from "../../lib/api";
 
 interface DBIntegration {
   id: string;
@@ -27,13 +29,13 @@ export default function SettingsPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [availRes, confRes] = await Promise.all([
-        fetch("http://localhost:4000/api/integrations/available"),
-        fetch("http://localhost:4000/api/integrations"),
+      const [avail, conf] = await Promise.all([
+        api.getIntegrations(), // Uses apiFetch which adds Auth header
+        api.getConfiguredIntegrations(), // I'll need to add this method to api.ts
       ]);
 
-      if (availRes.ok) setAvailable(await availRes.json());
-      if (confRes.ok) setConfigured(await confRes.json());
+      setAvailable(avail);
+      setConfigured(conf);
     } catch (err) {
       console.error("Failed to fetch integrations", err);
     } finally {
@@ -57,21 +59,9 @@ export default function SettingsPage() {
 
     setIsSaving(true);
     try {
-      const res = await fetch("http://localhost:4000/api/integrations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: selectedProvider.id,
-          config: formConfig,
-        }),
-      });
-
-      if (res.ok) {
-        await fetchData();
-        setSelectedProvider(null);
-      } else {
-        alert("Failed to save integration");
-      }
+      await api.saveIntegration(selectedProvider.id, formConfig);
+      await fetchData();
+      setSelectedProvider(null);
     } catch (err) {
       console.error(err);
       alert("Error saving integration");
@@ -88,17 +78,10 @@ export default function SettingsPage() {
     
     setIsDisconnecting(providerId);
     try {
-      const res = await fetch(`http://localhost:4000/api/integrations/${providerId}`, {
-        method: "DELETE",
-      });
-
-      if (res.ok) {
-        await fetchData();
-        if (selectedProvider?.id === providerId) {
-          setSelectedProvider(null);
-        }
-      } else {
-        alert("Failed to disconnect integration");
+      await api.deleteIntegration(providerId);
+      await fetchData();
+      if (selectedProvider?.id === providerId) {
+        setSelectedProvider(null);
       }
     } catch (err) {
       console.error(err);
@@ -189,7 +172,7 @@ export default function SettingsPage() {
                 <div>
                   <div className="flex items-center gap-3 mb-2">
                     {provider.icon ? (
-                      <div dangerouslySetInnerHTML={{ __html: provider.icon }} />
+                      <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(provider.icon) }} />
                     ) : (
                       <div className="w-10 h-10 bg-accent/10 rounded-xl flex items-center justify-center text-accent font-bold group-hover:bg-accent/20 transition-colors">
                         {provider.name[0]}
@@ -198,6 +181,14 @@ export default function SettingsPage() {
                     <h3 className="font-semibold text-lg">{provider.name}</h3>
                   </div>
                   <p className="text-sm text-muted">{provider.description}</p>
+                  {isConfigured && ['github', 'stripe', 'slack'].includes(provider.id) && (
+                    <div className="mt-3 p-2 bg-background/50 rounded-lg border border-border/50">
+                      <p className="text-[10px] uppercase font-bold text-muted mb-1">Webhook URL</p>
+                      <code className="text-[10px] break-all text-accent">
+                        {`http://localhost:4000/api/webhooks/${configured.find(c => c.provider === provider.id)?.id}`}
+                      </code>
+                    </div>
+                  )}
                 </div>
                 <div className="mt-6 flex items-center justify-between">
                   <span

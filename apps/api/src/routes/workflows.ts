@@ -1,18 +1,21 @@
 import type { FastifyInstance } from 'fastify';
 import { db, schema } from '../db/index.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { parseWorkflow, WorkflowParseError } from '@automesh/workflow-engine';
 import type { EventRouter } from '@automesh/workflow-engine';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import type { WorkflowDefinition } from '@automesh/shared-types';
+import { workflowQueue } from '../queue/queue.js';
 
 export async function workflowRoutes(app: FastifyInstance, eventRouter?: EventRouter) {
   // List all workflows
-  app.get('/api/workflows', async (_request, reply) => {
+  app.get('/api/workflows', { onRequest: [(app as any).authenticate] }, async (request, reply) => {
+    const user = (request as any).user;
     const rows = await db
       .select()
       .from(schema.workflows)
+      .where(eq(schema.workflows.userId, user.sub))
       .orderBy(desc(schema.workflows.createdAt));
 
     // Fetch latest version definition for each workflow
@@ -36,13 +39,14 @@ export async function workflowRoutes(app: FastifyInstance, eventRouter?: EventRo
   });
 
   // Get single workflow
-  app.get('/api/workflows/:id', async (request, reply) => {
+  app.get('/api/workflows/:id', { onRequest: [(app as any).authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const user = (request as any).user;
 
     const [workflow] = await db
       .select()
       .from(schema.workflows)
-      .where(eq(schema.workflows.id, id));
+      .where(and(eq(schema.workflows.id, id), eq(schema.workflows.userId, user.sub)));
 
     if (!workflow) {
       return reply.status(404).send({ error: 'Workflow not found' });
@@ -70,8 +74,9 @@ export async function workflowRoutes(app: FastifyInstance, eventRouter?: EventRo
   });
 
   // Create workflow from YAML
-  app.post('/api/workflows', async (request, reply) => {
+  app.post('/api/workflows', { onRequest: [(app as any).authenticate] }, async (request, reply) => {
     try {
+      const user = (request as any).user;
       const body = request.body as { yaml?: string; name?: string };
       const yamlContent = body.yaml;
 
@@ -84,13 +89,14 @@ export async function workflowRoutes(app: FastifyInstance, eventRouter?: EventRo
       const versionId = `wfv_${nanoid()}`;
       const name = body.name ?? definition.workflow;
 
-      await db.insert(schema.workflows).values({
+      await (db.insert(schema.workflows) as any).values({
         id,
+        userId: user.sub,
         name,
         currentVersion: 1,
       });
 
-      await db.insert(schema.workflowVersions).values({
+      await (db.insert(schema.workflowVersions) as any).values({
         id: versionId,
         workflowId: id,
         version: 1,
@@ -116,15 +122,16 @@ export async function workflowRoutes(app: FastifyInstance, eventRouter?: EventRo
   });
 
   // Update workflow (creates new version)
-  app.put('/api/workflows/:id', async (request, reply) => {
+  app.put('/api/workflows/:id', { onRequest: [(app as any).authenticate] }, async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
+      const user = (request as any).user;
       const body = request.body as { yaml: string };
 
       const [workflow] = await db
         .select()
         .from(schema.workflows)
-        .where(eq(schema.workflows.id, id));
+        .where(and(eq(schema.workflows.id, id), eq(schema.workflows.userId, user.sub)));
 
       if (!workflow) {
         return reply.status(404).send({ error: 'Workflow not found' });
@@ -134,7 +141,7 @@ export async function workflowRoutes(app: FastifyInstance, eventRouter?: EventRo
       const newVersion = workflow.currentVersion + 1;
       const versionId = `wfv_${nanoid()}`;
 
-      await db.insert(schema.workflowVersions).values({
+      await (db.insert(schema.workflowVersions) as any).values({
         id: versionId,
         workflowId: id,
         version: newVersion,
@@ -146,8 +153,8 @@ export async function workflowRoutes(app: FastifyInstance, eventRouter?: EventRo
         .set({
           currentVersion: newVersion,
           updatedAt: new Date(),
-        })
-        .where(eq(schema.workflows.id, id));
+        } as any)
+        .where(and(eq(schema.workflows.id, id), eq(schema.workflows.userId, user.sub)));
 
       if (eventRouter) {
         eventRouter.unregister(id);
@@ -170,13 +177,14 @@ export async function workflowRoutes(app: FastifyInstance, eventRouter?: EventRo
   });
 
   // Delete workflow
-  app.delete('/api/workflows/:id', async (request, reply) => {
+  app.delete('/api/workflows/:id', { onRequest: [(app as any).authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const user = (request as any).user;
 
     const [workflow] = await db
       .select()
       .from(schema.workflows)
-      .where(eq(schema.workflows.id, id));
+      .where(and(eq(schema.workflows.id, id), eq(schema.workflows.userId, user.sub)));
 
     if (!workflow) {
       return reply.status(404).send({ error: 'Workflow not found' });
@@ -192,20 +200,21 @@ export async function workflowRoutes(app: FastifyInstance, eventRouter?: EventRo
   });
 
   // Pause workflow
-  app.post('/api/workflows/:id/pause', async (request, reply) => {
+  app.post('/api/workflows/:id/pause', { onRequest: [(app as any).authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const user = (request as any).user;
 
     const [workflow] = await db
       .select()
       .from(schema.workflows)
-      .where(eq(schema.workflows.id, id));
+      .where(and(eq(schema.workflows.id, id), eq(schema.workflows.userId, user.sub)));
 
     if (!workflow) return reply.status(404).send({ error: 'Workflow not found' });
 
     await db
       .update(schema.workflows)
-      .set({ status: 'paused', updatedAt: new Date() })
-      .where(eq(schema.workflows.id, id));
+      .set({ status: 'paused', updatedAt: new Date() } as any)
+      .where(and(eq(schema.workflows.id, id), eq(schema.workflows.userId, user.sub)));
 
     if (eventRouter) eventRouter.unregister(id);
 
@@ -213,20 +222,21 @@ export async function workflowRoutes(app: FastifyInstance, eventRouter?: EventRo
   });
 
   // Resume workflow
-  app.post('/api/workflows/:id/resume', async (request, reply) => {
+  app.post('/api/workflows/:id/resume', { onRequest: [(app as any).authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const user = (request as any).user;
 
     const [workflow] = await db
       .select()
       .from(schema.workflows)
-      .where(eq(schema.workflows.id, id));
+      .where(and(eq(schema.workflows.id, id), eq(schema.workflows.userId, user.sub)));
 
     if (!workflow) return reply.status(404).send({ error: 'Workflow not found' });
 
     await db
       .update(schema.workflows)
-      .set({ status: 'active', updatedAt: new Date() })
-      .where(eq(schema.workflows.id, id));
+      .set({ status: 'active', updatedAt: new Date() } as any)
+      .where(and(eq(schema.workflows.id, id), eq(schema.workflows.userId, user.sub)));
 
     const [latestVersion] = await db
       .select()
@@ -246,14 +256,15 @@ export async function workflowRoutes(app: FastifyInstance, eventRouter?: EventRo
   });
 
   // Manual trigger
-  app.post('/api/workflows/:id/trigger', async (request, reply) => {
+  app.post('/api/workflows/:id/trigger', { onRequest: [(app as any).authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const user = (request as any).user;
     const body = (request.body as Record<string, unknown>) ?? {};
 
     const [workflow] = await db
       .select()
       .from(schema.workflows)
-      .where(eq(schema.workflows.id, id));
+      .where(and(eq(schema.workflows.id, id), eq(schema.workflows.userId, user.sub)));
 
     if (!workflow) {
       return reply.status(404).send({ error: 'Workflow not found' });
@@ -273,15 +284,15 @@ export async function workflowRoutes(app: FastifyInstance, eventRouter?: EventRo
 
     const runId = `run_${nanoid()}`;
 
-    await db.insert(schema.workflowRuns).values({
+    await (db.insert(schema.workflowRuns) as any).values({
       id: runId,
+      userId: user.sub,
       workflowId: id,
       versionId: latestVersion.id,
       status: 'pending',
     });
 
     // Enqueue to BullMQ for background execution
-    const { workflowQueue } = await import('../queue/queue.js');
     await workflowQueue.add('execute', {
       workflowId: id,
       runId,

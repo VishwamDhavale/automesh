@@ -1,13 +1,18 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+  throw new Error('JWT_SECRET environment variable is required in production');
+}
+const ACTUAL_SECRET = JWT_SECRET ?? 'dev-secret-only-for-local-development';
 
 export interface JwtPayload {
   sub: string;
   email: string;
   iat: number;
 }
+
 
 export async function authMiddleware(app: FastifyInstance) {
   app.decorate('authenticate', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -20,7 +25,7 @@ export async function authMiddleware(app: FastifyInstance) {
     const token = authHeader.slice(7);
 
     try {
-      const payload = jwt.verify(token, JWT_SECRET) as JwtPayload;
+      const payload = jwt.verify(token, ACTUAL_SECRET) as JwtPayload;
       (request as any).user = payload;
     } catch {
       return reply.status(401).send({ error: 'Invalid or expired token' });
@@ -32,24 +37,9 @@ export async function authMiddleware(app: FastifyInstance) {
 export function generateToken(userId: string, email: string): string {
   return jwt.sign(
     { sub: userId, email } as JwtPayload,
-    JWT_SECRET,
+    ACTUAL_SECRET,
     { expiresIn: '24h' }
   );
 }
 
-// Auth routes (login endpoint for development)
-export async function authRoutes(app: FastifyInstance) {
-  app.post('/api/auth/token', async (request, reply) => {
-    const { email } = request.body as { email?: string };
-
-    if (!email) {
-      return reply.status(400).send({ error: 'Email required' });
-    }
-
-    // In dev mode, generate token directly
-    // In production, implement proper authentication
-    const token = generateToken(`user_${Date.now()}`, email);
-
-    return reply.send({ token, expiresIn: '24h' });
-  });
-}
+// Auth routes removed for security (SEC-01)

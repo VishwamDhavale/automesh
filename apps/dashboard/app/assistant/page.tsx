@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { api } from "@/lib/api";
+import { sanitizeHtml } from "@/lib/sanitize";
 
 interface ChatMessage {
   id: string;
@@ -174,7 +175,7 @@ export default function AssistantPage() {
 
             return (
               <span key={j}>
-                <span dangerouslySetInnerHTML={{ __html: processed }} />
+                <span dangerouslySetInnerHTML={{ __html: sanitizeHtml(processed) }} />
                 {j < lines.length - 1 && <br />}
               </span>
             );

@@ -7,6 +7,15 @@ export async function apiFetch<T>(
   const url = `${API_BASE}${endpoint}`;
 
   const headers: HeadersInit = { ...options.headers };
+  
+  // SEC-02: Add Authorization header from localStorage
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('automesh_token');
+    if (token) {
+      (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
+    }
+  }
+
   // Only add Content-Type if we have a body or it's not explicitly removed
   if (options.body && !headers['Content-Type' as keyof typeof headers]) {
     (headers as Record<string, string>)['Content-Type'] = 'application/json';
@@ -74,9 +83,16 @@ export const api = {
   getAiChatHistory: (sessionId: string) =>
     apiFetch<{ history: { role: string; content: string }[] }>(`/api/ai/chat/${sessionId}`),
 
-  // Marketplace
-  getIntegrations: () => apiFetch<any[]>('/api/marketplace/integrations'),
-  getPlugins: () => apiFetch<any[]>('/api/marketplace/plugins'),
+  // Integrations
+  getIntegrations: () => apiFetch<any[]>('/api/integrations/available'),
+  getConfiguredIntegrations: () => apiFetch<any[]>('/api/integrations'),
+  saveIntegration: (provider: string, config: Record<string, string>) =>
+    apiFetch<any>('/api/integrations', {
+      method: 'POST',
+      body: JSON.stringify({ provider, config }),
+    }),
+  deleteIntegration: (provider: string) =>
+    apiFetch<any>(`/api/integrations/${provider}`, { method: 'DELETE' }),
 
   // Health
   health: () => apiFetch<{ status: string }>('/api/health'),

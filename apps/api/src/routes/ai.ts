@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import Groq from 'groq-sdk';
 import { nanoid } from 'nanoid';
 import { db, schema } from '../db/index.js';
-import { eq, asc } from 'drizzle-orm';
+import { eq, asc, and } from 'drizzle-orm';
 import { encrypt, decrypt } from '../utils/crypto.js';
 import { parseWorkflow } from '@automesh/workflow-engine';
 
@@ -124,10 +124,13 @@ CRITICAL RULES:
 
 // ─── Tool Execution ─────────────────────────────────────────────
 
-async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
+async function executeTool(name: string, args: Record<string, unknown>, userId: string): Promise<string> {
   switch (name) {
     case 'check_integrations': {
-      const integrations = await db.select().from(schema.integrations);
+      const integrations = await db
+        .select()
+        .from(schema.integrations)
+        .where(eq(schema.integrations.userId, userId));
       const configured = integrations.map((i) => ({
         provider: i.provider,
         configured: true,
@@ -189,13 +192,14 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
         const versionId = `wfv_${nanoid()}`;
         const name = definition.workflow;
 
-        await db.insert(schema.workflows).values({
+        await (db.insert(schema.workflows) as any).values({
           id,
+          userId,
           name,
           currentVersion: 1,
         });
 
-        await db.insert(schema.workflowVersions).values({
+        await (db.insert(schema.workflowVersions) as any).values({
           id: versionId,
           workflowId: id,
           version: 1,
@@ -223,11 +227,12 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
 
 // ─── Message Storage (Encrypted) ────────────────────────────────
 
-async function saveMessage(sessionId: string, role: string, content: string) {
+async function saveMessage(sessionId: string, userId: string, role: string, content: string) {
   const { encrypted, iv, authTag } = encrypt(content);
-  await db.insert(schema.aiConversations).values({
+  await (db.insert(schema.aiConversations) as any).values({
     id: `msg_${nanoid()}`,
     sessionId,
+    userId,
     role,
     encryptedContent: encrypted,
     iv,
@@ -235,11 +240,11 @@ async function saveMessage(sessionId: string, role: string, content: string) {
   });
 }
 
-async function loadMessages(sessionId: string): Promise<{ role: string; content: string }[]> {
+async function loadMessages(sessionId: string, userId: string): Promise<{ role: string; content: string }[]> {
   const rows = await db
     .select()
     .from(schema.aiConversations)
-    .where(eq(schema.aiConversations.sessionId, sessionId))
+    .where(and(eq(schema.aiConversations.sessionId, sessionId), eq(schema.aiConversations.userId, userId)))
     .orderBy(asc(schema.aiConversations.createdAt));
 
   return rows.map((row) => ({
@@ -252,11 +257,12 @@ async function loadMessages(sessionId: string): Promise<{ role: string; content:
 
 export async function aiRoutes(app: FastifyInstance) {
   // New intelligent chat endpoint
-  app.get('/api/ai/chat/:sessionId', async (request, reply) => {
+  app.get('/api/ai/chat/:sessionId', { onRequest: [(app as any).authenticate] }, async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
+    const user = (request as any).user;
     
     try {
-      const history = await loadMessages(sessionId);
+      const history = await loadMessages(sessionId, user.sub);
       return reply.send({ history });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -264,7 +270,8 @@ export async function aiRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/ai/chat', async (request, reply) => {
+  app.post('/api/ai/chat', { onRequest: [(app as any).authenticate] }, async (request, reply) => {
+    const user = (request as any).user;
     const { message, sessionId: incomingSessionId } = request.body as {
       message: string;
       sessionId?: string;
@@ -282,10 +289,10 @@ export async function aiRoutes(app: FastifyInstance) {
     const sessionId = incomingSessionId || `session_${nanoid()}`;
 
     // Save the user message
-    await saveMessage(sessionId, 'user', message);
+    await saveMessage(sessionId, user.sub, 'user', message);
 
     // Load full conversation history (decrypted)
-    const history = await loadMessages(sessionId);
+    const history = await loadMessages(sessionId, user.sub);
 
     // Build messages for Groq
     const messages: Groq.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -323,7 +330,7 @@ export async function aiRoutes(app: FastifyInstance) {
         // Execute each tool call
         for (const toolCall of responseMessage.tool_calls) {
           const args = JSON.parse(toolCall.function.arguments || '{}');
-          const result = await executeTool(toolCall.function.name, args);
+          const result = await executeTool(toolCall.function.name, args, user.sub);
 
           messages.push({
             role: 'tool',
@@ -342,7 +349,7 @@ export async function aiRoutes(app: FastifyInstance) {
     }
 
     // Save the assistant response (encrypted)
-    await saveMessage(sessionId, 'assistant', finalContent);
+    await saveMessage(sessionId, user.sub, 'assistant', finalContent);
 
     return reply.send({
       sessionId,
@@ -352,7 +359,7 @@ export async function aiRoutes(app: FastifyInstance) {
   });
 
   // Keep old simple generate endpoint for backward compatibility
-  app.post('/api/ai/generate', async (request, reply) => {
+  app.post('/api/ai/generate', { onRequest: [(app as any).authenticate] }, async (request, reply) => {
     const { prompt } = request.body as { prompt: string };
 
     if (!prompt) {

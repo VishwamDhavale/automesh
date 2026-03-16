@@ -4,6 +4,7 @@ import { pgTable, text, timestamp, jsonb, serial, integer, varchar } from 'drizz
 
 export const workflows = pgTable('workflows', {
   id: text('id').primaryKey(),
+  userId: text('user_id').notNull(), // Added for multi-tenancy (SEC-02)
   name: varchar('name', { length: 255 }).notNull(),
   status: varchar('status', { length: 50 }).notNull().default('active'),
   currentVersion: integer('current_version').notNull().default(1),
@@ -25,6 +26,7 @@ export const workflowVersions = pgTable('workflow_versions', {
 
 export const workflowRuns = pgTable('workflow_runs', {
   id: text('id').primaryKey(),
+  userId: text('user_id').notNull(), // Added for multi-tenancy (SEC-02)
   workflowId: text('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }),
   versionId: text('version_id').references(() => workflowVersions.id, { onDelete: 'cascade' }),
   status: varchar('status', { length: 50 }).notNull().default('pending'),
@@ -60,6 +62,7 @@ export const workflowBlobs = pgTable('workflow_blobs', {
 
 export const events = pgTable('events', {
   id: text('id').primaryKey(),
+  userId: text('user_id'), // Optional for events, as some webhooks might not initially have a user
   source: varchar('source', { length: 100 }).notNull(),
   eventType: varchar('event_type', { length: 255 }).notNull(),
   payload: jsonb('payload').notNull(),
@@ -70,6 +73,7 @@ export const events = pgTable('events', {
 
 export const integrations = pgTable('integrations', {
   id: varchar('id', { length: 50 }).primaryKey(),
+  userId: text('user_id').notNull(), // Added for multi-tenancy (SEC-02)
   provider: varchar('provider', { length: 50 }).notNull(),
   config: jsonb('config').notNull().default({}),
   createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -80,6 +84,7 @@ export const integrations = pgTable('integrations', {
 
 export const aiConversations = pgTable('ai_conversations', {
   id: text('id').primaryKey(),
+  userId: text('user_id').notNull(), // Added for multi-tenancy (SEC-02)
   sessionId: varchar('session_id', { length: 100 }).notNull(),
   role: varchar('role', { length: 20 }).notNull(), // 'user' | 'assistant' | 'tool'
   encryptedContent: text('encrypted_content').notNull(),
