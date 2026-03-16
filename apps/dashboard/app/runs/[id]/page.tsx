@@ -9,6 +9,7 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
   const { id } = use(params);
   const [run, setRun] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -20,6 +21,21 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
     }
     load();
   }, [id]);
+
+  const handleCancel = async () => {
+    if (!window.confirm("Are you sure you want to cancel this run?")) return;
+    setIsCancelling(true);
+    try {
+      await api.cancelRun(id);
+      // Reload after cancellation
+      const data = await api.getRun(id);
+      setRun(data);
+    } catch (err: any) {
+      alert(err.message || "Failed to cancel run");
+    } finally {
+      setIsCancelling(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -39,6 +55,8 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
     );
   }
 
+  const isCancellable = run.status === "pending" || run.status === "running";
+
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       {/* Header */}
@@ -46,11 +64,22 @@ export default function RunDetailPage({ params }: { params: Promise<{ id: string
         <Link href="/runs" className="text-sm text-muted hover:text-foreground transition-colors mb-2 inline-block">
           ← Runs
         </Link>
-        <div className="flex items-center gap-4">
-          <h1 className="text-3xl font-bold tracking-tight">Run Details</h1>
-          <span className={`px-3 py-1 rounded-lg text-sm font-medium border ${statusBg(run.status)}`}>
-            {run.status}
-          </span>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <h1 className="text-3xl font-bold tracking-tight">Run Details</h1>
+            <span className={`px-3 py-1 rounded-lg text-sm font-medium border ${statusBg(run.status)}`}>
+              {run.status}
+            </span>
+          </div>
+          {isCancellable && (
+            <button
+              onClick={handleCancel}
+              disabled={isCancelling}
+              className="px-4 py-2 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 rounded-lg font-medium text-sm transition-colors border border-rose-500/20 disabled:opacity-50"
+            >
+              {isCancelling ? "Cancelling..." : "Cancel Run"}
+            </button>
+          )}
         </div>
         <p className="text-muted mt-1 font-mono text-sm">{run.id}</p>
       </div>

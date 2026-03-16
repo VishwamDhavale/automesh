@@ -12,6 +12,7 @@ import { eventRoutes } from './routes/events.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { aiRoutes } from './routes/ai.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
+import { integrationsRoutes } from './routes/integrations.js';
 import { authRoutes } from './middleware/auth.js';
 import { startWorker } from './queue/worker.js';
 import { EventRouter } from '@automesh/workflow-engine';
@@ -37,6 +38,7 @@ async function start() {
   await app.register(cors, {
     origin: process.env.DASHBOARD_URL ?? 'http://localhost:3000',
     credentials: true,
+    methods: ['GET', 'PUT', 'POST', 'DELETE', 'OPTIONS'],
   });
 
   await app.register(rateLimit, {
@@ -82,6 +84,7 @@ async function start() {
   await app.register(async (instance) => webhookRoutes(instance, eventRouter));
   await app.register(aiRoutes);
   await app.register(marketplaceRoutes);
+  await app.register(integrationsRoutes);
 
   // ─── Start BullMQ Worker ──────────────────────────────────────
   startWorker();

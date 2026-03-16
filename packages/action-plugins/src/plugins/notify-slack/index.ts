@@ -24,7 +24,8 @@ export async function run(
     };
   }
 
-  const token = process.env.SLACK_BOT_TOKEN;
+  // Fetch token from the dynamic integration context passed by the worker
+  const token = context.integrations?.slack?.botToken;
 
   if (!token) {
     // Mock mode

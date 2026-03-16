@@ -10,7 +10,6 @@ import { SlackAdapter } from './adapters/slack.js';
 import { ResendAdapter } from './adapters/resend.js';
 import { GitHubAdapter } from './adapters/github.js';
 import { BaseAdapter } from './base-adapter.js';
-import type { IntegrationRegistryEntry } from '@automesh/shared-types';
 
 // ─── Adapter Registry ───────────────────────────────────────────
 
@@ -28,8 +27,11 @@ export function getAllAdapters(): BaseAdapter[] {
   return Array.from(adapters.values());
 }
 
-export function getIntegrationRegistry(): IntegrationRegistryEntry[] {
-  return Array.from(adapters.values()).map(a => a.getRegistryEntry());
+export function getIntegrationRegistry() {
+  return Array.from(adapters.values()).map((a) => ({
+    name: a.name,
+    displayName: a.displayName,
+  }));
 }
 
 // Auto-register built-in adapters

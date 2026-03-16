@@ -26,7 +26,8 @@ export async function run(
     };
   }
 
-  const apiKey = process.env.RESEND_API_KEY;
+  // Fetch token from the dynamic integration context passed by the worker
+  const apiKey = context.integrations?.resend?.apiKey;
 
   if (!apiKey) {
     // Mock mode when no API key

@@ -1,0 +1,29 @@
+workflow: mcp_docs_bot
+
+trigger:
+  event: github.issues
+
+conditions:
+  - "event.data.action == 'opened'"
+
+steps:
+  - id: fetch_docs
+    action: run_mcp_tool
+    input:
+      serverCommand: npx
+      serverArgs: ["-y", "@modelcontextprotocol/server-filesystem", "/home/vishwam-linux/Desktop/learning/automesh"]
+      toolName: read_file
+      toolArgs:
+        path: "README.md"
+
+  - id: notify_slack
+    action: slack.postMessage
+    input:
+      channel: all-vishwam-labs
+      text: |
+        *New GitHub Issue Opened!*
+        Issue: {{ event.data.issue.title }}
+        URL: {{ event.data.issue.html_url }}
+        
+        *Context from Local README (via MCP):*
+        {{ fetch_docs.result }}

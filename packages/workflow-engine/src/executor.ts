@@ -23,6 +23,7 @@ export interface ExecutionOptions {
   actionRunner: ActionRunner;
   logger?: PluginLogger;
   initialContext?: Record<string, unknown>;
+  checkIfCancelled?: () => Promise<boolean>;
 }
 
 // ─── Template Interpolation ─────────────────────────────────────
@@ -154,6 +155,15 @@ export async function executeWorkflow(
   for (let i = 0; i < definition.steps.length; i++) {
     const step = definition.steps[i];
     const stepId = step.id ?? `step_${i}`;
+
+    if (options.checkIfCancelled) {
+      const isCancelled = await options.checkIfCancelled();
+      if (isCancelled) {
+        logger.info(`Workflow "${definition.workflow}" cancelled before step "${stepId}"`);
+        overallStatus = 'cancelled';
+        break;
+      }
+    }
     const stepStartedAt = new Date().toISOString();
 
     logger.info(`Step "${stepId}" (${step.action}) starting`);
@@ -176,6 +186,7 @@ export async function executeWorkflow(
       runId,
       stepId,
       state: { ...state },
+      integrations: {},
       logger,
     };
 

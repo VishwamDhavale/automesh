@@ -1,12 +1,11 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 import { nanoid } from 'nanoid';
-import type { NormalizedEvent, IntegrationRegistryEntry } from '@automesh/shared-types';
+import type { NormalizedEvent } from '@automesh/shared-types';
 import { BaseAdapter } from '../base-adapter.js';
 
 export class SlackAdapter extends BaseAdapter {
   readonly name = 'slack';
   readonly displayName = 'Slack';
-  readonly category = 'messaging' as const;
 
   verifyWebhookSignature(payload: string | Buffer, signature: string, secret: string): boolean {
     try {
@@ -28,19 +27,6 @@ export class SlackAdapter extends BaseAdapter {
       type: eventType,
       timestamp: new Date().toISOString(),
       data: rawPayload,
-    };
-  }
-
-  getRegistryEntry(): IntegrationRegistryEntry {
-    return {
-      name: 'slack',
-      displayName: 'Slack',
-      logo: '/integrations/slack.svg',
-      category: 'messaging',
-      description: 'Send messages and receive events from Slack',
-      actions: ['postMessage', 'updateMessage'],
-      webhookEvents: ['slack.message', 'slack.reaction_added'],
-      configFields: ['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET'],
     };
   }
 }

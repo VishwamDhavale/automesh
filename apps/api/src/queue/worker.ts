@@ -21,6 +21,7 @@ async function processWorkflowJob(job: Job<WorkflowJobData>) {
   const { workflowId, runId, definition, context } = job.data;
 
   pluginLogger.info(`Processing workflow "${workflowId}" run "${runId}"`);
+  console.log('--- WORKER JOB STARTING ---');
 
   // Mark run as "running"
   await db
@@ -37,6 +38,15 @@ async function processWorkflowJob(job: Job<WorkflowJobData>) {
       stepActionMap.set(stepId, s.action);
     });
 
+    // Fetch integrations from database
+    const integrationsList = await db.select().from(schema.integrations);
+    const integrations: Record<string, Record<string, string>> = {};
+    for (const intg of integrationsList) {
+      if (intg.config) {
+        integrations[intg.provider] = intg.config as Record<string, string>;
+      }
+    }
+
     // Execute the workflow using the engine
     const result = await executeWorkflow(
       definition as unknown as WorkflowDefinition,
@@ -45,24 +55,55 @@ async function processWorkflowJob(job: Job<WorkflowJobData>) {
         runId,
         logger: pluginLogger,
         initialContext: context,
+        checkIfCancelled: async () => {
+          const [run] = await db
+            .select({ status: schema.workflowRuns.status })
+            .from(schema.workflowRuns)
+            .where(eq(schema.workflowRuns.id, runId));
+          return run?.status === 'cancelled';
+        },
         actionRunner: async (
-          pluginContext: PluginContext,
+          pluginContext: Omit<PluginContext, 'integrations'>,
           params: Record<string, unknown>
         ): Promise<PluginResult> => {
           const actionName = stepActionMap.get(pluginContext.stepId) ?? pluginContext.stepId;
-          return runAction(actionName, pluginContext, params);
+          const fullContext: PluginContext = { ...pluginContext, integrations };
+          return runAction(actionName, fullContext, params);
         },
       }
     );
 
     // Save each step result to the DB
     for (const stepResult of result.steps) {
+      let finalResult = stepResult.result ? (stepResult.result as Record<string, unknown>) : null;
+
+      // CONTEXT SANDBOXING for massive MCP payloads
+      if (finalResult && typeof finalResult.__mcpPayload === 'string') {
+        const blobId = `wb_${nanoid()}`;
+        pluginLogger.info(`Intercepted massive MCP payload for step "${stepResult.stepName}". Sandboxing to blob ${blobId}.`);
+        
+        await db.insert(schema.workflowBlobs).values({
+          id: blobId,
+          runId,
+          stepName: stepResult.stepName,
+          data: finalResult.__mcpPayload,
+        });
+
+        // Replace the massive string with a lightweight reference
+        finalResult = {
+          ...finalResult,
+          __mcpPayload: undefined,
+          blobId,
+          sandboxed: true,
+        };
+      }
+
       await db.insert(schema.workflowSteps).values({
         id: `ws_${nanoid()}`,
         runId,
         stepName: stepResult.stepName,
         status: stepResult.status,
-        result: stepResult.result ? (stepResult.result as Record<string, unknown>) : null,
+        result: finalResult,
         error: stepResult.error ?? null,
         startedAt: new Date(stepResult.startedAt),
         completedAt: stepResult.completedAt ? new Date(stepResult.completedAt) : null,
@@ -102,6 +143,7 @@ async function processWorkflowJob(job: Job<WorkflowJobData>) {
 // ─── Worker Instance ────────────────────────────────────────────
 
 export function startWorker() {
+  console.log('--- STARTING BULLMQ WORKER ---');
   const worker = new Worker<WorkflowJobData>(
     'workflow-execution',
     processWorkflowJob,
@@ -123,3 +165,16 @@ export function startWorker() {
 
   return worker;
 }
+
+if (import.meta.url.endsWith(process.argv[1] || '')) {
+  (async () => {
+    const { config } = await import('dotenv');
+    const { resolve, dirname } = await import('path');
+    const { fileURLToPath } = await import('url');
+    const __dirnameSelection = dirname(fileURLToPath(import.meta.url));
+    config({ path: resolve(__dirnameSelection, '../../../.env') });
+
+    startWorker();
+  })();
+}
+

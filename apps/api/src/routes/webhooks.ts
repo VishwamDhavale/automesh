@@ -25,14 +25,23 @@ export async function webhookRoutes(app: FastifyInstance, eventRouter?: EventRou
       ? request.body
       : JSON.stringify(request.body);
 
-    // Verify webhook signature (if secret is configured)
-    const secrets: Record<string, string | undefined> = {
-      stripe: process.env.STRIPE_WEBHOOK_SECRET,
-      github: process.env.GITHUB_WEBHOOK_SECRET,
-      slack: process.env.SLACK_SIGNING_SECRET,
-    };
+    // Verify webhook signature (if secret is configured in DB)
+    let secret: string | undefined;
 
-    const secret = secrets[provider];
+    const [integration] = await db
+      .select()
+      .from(schema.integrations)
+      .where(eq(schema.integrations.provider, provider));
+
+    if (integration && integration.config) {
+      const config = integration.config as Record<string, string>;
+      
+      // Determine the correct field name for the secret based on the provider
+      if (provider === 'github') secret = config.webhookSecret;
+      else if (provider === 'stripe') secret = config.webhookSecret;
+      else if (provider === 'slack') secret = config.signingSecret;
+    }
+
     if (secret) {
       const signatureHeaders: Record<string, string> = {
         stripe: 'stripe-signature',
@@ -60,44 +69,62 @@ export async function webhookRoutes(app: FastifyInstance, eventRouter?: EventRou
       headers
     );
 
-    // Store event
-    await db.insert(schema.events).values({
-      id: normalizedEvent.id,
-      source: normalizedEvent.source,
-      eventType: normalizedEvent.type,
-      payload: normalizedEvent.data,
-    });
-
     // Match event against registered workflows and enqueue jobs
     if (eventRouter) {
-      const matchedWorkflows = eventRouter.match(normalizedEvent);
+      const allMatchedWorkflows = eventRouter.match(normalizedEvent);
 
-      for (const matched of matchedWorkflows) {
-        // Fetch latest version definition
-        const [latestVersion] = await db
-          .select()
-          .from(schema.workflowVersions)
-          .where(eq(schema.workflowVersions.workflowId, matched.id))
-          .orderBy(desc(schema.workflowVersions.version))
-          .limit(1);
+      if (allMatchedWorkflows.length > 0) {
+        // Fetch statuses of matched workflows to ensure we only trigger active ones
+        const workflowIds = allMatchedWorkflows.map(w => w.id);
+        const matchedActiveWorkflows = await db
+          .select({ id: schema.workflows.id })
+          .from(schema.workflows)
+          .where(
+            eq(schema.workflows.status, 'active')
+          );
+        
+        // Intersect matches with active workflows
+        const activeMatches = allMatchedWorkflows.filter(mw => 
+          matchedActiveWorkflows.some(aw => aw.id === mw.id)
+        );
 
-        if (!latestVersion) continue;
+        if (activeMatches.length > 0) {
+          // Store event only if it matched AT LEAST ONE ACTIVE workflow
+          await db.insert(schema.events).values({
+            id: normalizedEvent.id,
+            source: normalizedEvent.source,
+            eventType: normalizedEvent.type,
+            payload: normalizedEvent.data,
+          });
 
-        const runId = `run_${nanoid()}`;
+          for (const matched of activeMatches) {
+            // Fetch latest version definition
+            const [latestVersion] = await db
+              .select()
+              .from(schema.workflowVersions)
+              .where(eq(schema.workflowVersions.workflowId, matched.id))
+              .orderBy(desc(schema.workflowVersions.version))
+              .limit(1);
 
-        await db.insert(schema.workflowRuns).values({
-          id: runId,
-          workflowId: matched.id,
-          versionId: latestVersion.id,
-          status: 'pending',
-        });
+            if (!latestVersion) continue;
 
-        await workflowQueue.add('execute', {
-          workflowId: matched.id,
-          runId,
-          definition: latestVersion.definition as Record<string, unknown>,
-          context: { event: normalizedEvent },
-        });
+            const runId = `run_${nanoid()}`;
+
+            await db.insert(schema.workflowRuns).values({
+              id: runId,
+              workflowId: matched.id,
+              versionId: latestVersion.id,
+              status: 'pending',
+            });
+
+            await workflowQueue.add('execute', {
+              workflowId: matched.id,
+              runId,
+              definition: latestVersion.definition as Record<string, unknown>,
+              context: { event: normalizedEvent },
+            });
+          }
+        }
       }
     }
 

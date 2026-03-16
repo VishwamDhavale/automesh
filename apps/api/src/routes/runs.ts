@@ -61,4 +61,31 @@ export async function runRoutes(app: FastifyInstance) {
       steps,
     });
   });
+
+  // Cancel a running workflow
+  app.post('/api/runs/:id/cancel', async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    const [run] = await db
+      .select()
+      .from(schema.workflowRuns)
+      .where(eq(schema.workflowRuns.id, id));
+
+    if (!run) {
+      return reply.status(404).send({ error: 'Run not found' });
+    }
+
+    if (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled') {
+      return reply.status(400).send({ error: `Cannot cancel run in status: ${run.status}` });
+    }
+
+    await db
+      .update(schema.workflowRuns)
+      .set({
+        status: 'cancelled',
+      })
+      .where(eq(schema.workflowRuns.id, id));
+
+    return reply.send({ success: true, status: 'cancelled' });
+  });
 }

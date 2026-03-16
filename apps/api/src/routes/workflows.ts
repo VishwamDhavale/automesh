@@ -191,6 +191,60 @@ export async function workflowRoutes(app: FastifyInstance, eventRouter?: EventRo
     return reply.send({ deleted: true });
   });
 
+  // Pause workflow
+  app.post('/api/workflows/:id/pause', async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    const [workflow] = await db
+      .select()
+      .from(schema.workflows)
+      .where(eq(schema.workflows.id, id));
+
+    if (!workflow) return reply.status(404).send({ error: 'Workflow not found' });
+
+    await db
+      .update(schema.workflows)
+      .set({ status: 'paused', updatedAt: new Date() })
+      .where(eq(schema.workflows.id, id));
+
+    if (eventRouter) eventRouter.unregister(id);
+
+    return reply.send({ id, status: 'paused' });
+  });
+
+  // Resume workflow
+  app.post('/api/workflows/:id/resume', async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    const [workflow] = await db
+      .select()
+      .from(schema.workflows)
+      .where(eq(schema.workflows.id, id));
+
+    if (!workflow) return reply.status(404).send({ error: 'Workflow not found' });
+
+    await db
+      .update(schema.workflows)
+      .set({ status: 'active', updatedAt: new Date() })
+      .where(eq(schema.workflows.id, id));
+
+    const [latestVersion] = await db
+      .select()
+      .from(schema.workflowVersions)
+      .where(eq(schema.workflowVersions.workflowId, id))
+      .orderBy(desc(schema.workflowVersions.version))
+      .limit(1);
+
+    if (eventRouter && latestVersion?.definition) {
+      const def = latestVersion.definition as unknown as WorkflowDefinition;
+      if (def.trigger?.event) {
+        eventRouter.register(id, def);
+      }
+    }
+
+    return reply.send({ id, status: 'active' });
+  });
+
   // Manual trigger
   app.post('/api/workflows/:id/trigger', async (request, reply) => {
     const { id } = request.params as { id: string };

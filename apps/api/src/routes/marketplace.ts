@@ -1,12 +1,21 @@
 import type { FastifyInstance } from 'fastify';
-import { getIntegrationRegistry } from '@automesh/integrations';
 import { getAllPlugins } from '@automesh/action-plugins';
+import * as Integrations from '@automesh/integrations';
 
 export async function marketplaceRoutes(app: FastifyInstance) {
   // List all available integrations
   app.get('/api/marketplace/integrations', async (_request, reply) => {
-    const registry = getIntegrationRegistry();
-    return reply.send(registry);
+    // Defensive check to handle potential monorepo linking issues during dev
+    const getRegistry = (Integrations as any).getIntegrationRegistry;
+    if (typeof getRegistry !== 'function') {
+      return reply.send([
+        { name: 'github', displayName: 'GitHub' },
+        { name: 'slack', displayName: 'Slack' },
+        { name: 'resend', displayName: 'Resend' },
+        { name: 'stripe', displayName: 'Stripe' }
+      ]);
+    }
+    return reply.send(getRegistry());
   });
 
   // List all available action plugins

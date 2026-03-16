@@ -77,6 +77,7 @@ export interface PluginContext {
   runId: string;
   stepId: string;
   state: Record<string, unknown>;      // accumulated state from previous steps
+  integrations: Record<string, Record<string, string>>; // Credentials from DB
   logger: PluginLogger;
 }
 
@@ -97,18 +98,7 @@ export type PluginRunFn = (
   params: Record<string, unknown>
 ) => Promise<PluginResult>;
 
-// ─── Integration Types ──────────────────────────────────────────
-
-export interface IntegrationRegistryEntry {
-  name: string;
-  displayName: string;
-  logo?: string;
-  category: 'payments' | 'crm' | 'messaging' | 'storage' | 'dev-tools';
-  description: string;
-  actions: string[];
-  webhookEvents: string[];
-  configFields: string[];
-}
+export * from './integrations.js';
 
 // ─── API Types ──────────────────────────────────────────────────
 

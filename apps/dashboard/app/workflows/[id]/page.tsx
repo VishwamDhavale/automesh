@@ -5,11 +5,26 @@ import Link from "next/link";
 import { statusBg, timeAgo } from "@/lib/utils";
 import { api } from "@/lib/api";
 
+import { ConfirmModal } from "@/components/ConfirmModal";
+import { useRouter } from "next/navigation";
+
 export default function WorkflowDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const router = useRouter();
   const [workflow, setWorkflow] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
+  
+  // Modal state
+  const [confirmState, setConfirmState] = useState<{
+    isOpen: boolean;
+    action: "delete" | "pause" | "resume" | null;
+    isProcessing: boolean;
+  }>({
+    isOpen: false,
+    action: null,
+    isProcessing: false,
+  });
 
   useEffect(() => {
     async function load() {
@@ -31,6 +46,67 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
     } catch {}
     setTriggering(false);
   }
+
+  const openConfirm = (action: "delete" | "pause" | "resume") => {
+    setConfirmState({ isOpen: true, action, isProcessing: false });
+  };
+
+  const closeConfirm = () => {
+    setConfirmState((prev) => ({ ...prev, isOpen: false }));
+  };
+
+  const handleActionConfirm = async () => {
+    const { action } = confirmState;
+    if (!action) return;
+
+    setConfirmState((prev) => ({ ...prev, isProcessing: true }));
+
+    try {
+      if (action === "delete") {
+        await api.deleteWorkflow(id);
+        router.push("/workflows");
+        return; // Don't close modal, we're navigating away
+      } else if (action === "pause") {
+        const res = await api.pauseWorkflow(id);
+        setWorkflow({ ...workflow, status: res.status });
+      } else if (action === "resume") {
+        const res = await api.resumeWorkflow(id);
+        setWorkflow({ ...workflow, status: res.status });
+      }
+    } catch (err) {
+      console.error(`Failed to ${action} workflow:`, err);
+    }
+
+    closeConfirm();
+  };
+
+  const getModalProps = () => {
+    switch (confirmState.action) {
+      case "delete":
+        return {
+          title: "Delete Workflow",
+          message: `Are you sure you want to delete "${workflow?.name}"? This is permanent.`,
+          confirmText: "Delete",
+          type: "danger" as const,
+        };
+      case "pause":
+        return {
+          title: "Pause Workflow",
+          message: `Are you sure you want to pause "${workflow?.name}"?`,
+          confirmText: "Pause",
+          type: "warning" as const,
+        };
+      case "resume":
+        return {
+          title: "Resume Workflow",
+          message: `Are you sure you want to resume "${workflow?.name}"?`,
+          confirmText: "Resume",
+          type: "info" as const,
+        };
+      default:
+        return { title: "", message: "" };
+    }
+  };
 
   if (loading) {
     return (
@@ -54,26 +130,66 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
+      <ConfirmModal
+        isOpen={confirmState.isOpen}
+        onClose={closeConfirm}
+        onConfirm={handleActionConfirm}
+        isLoading={confirmState.isProcessing}
+        {...getModalProps()}
+      />
+      
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <Link href="/workflows" className="text-sm text-muted hover:text-foreground transition-colors mb-2 inline-block">
             ← Workflows
           </Link>
-          <h1 className="text-3xl font-bold tracking-tight">{workflow.name}</h1>
-          <div className="flex items-center gap-3 mt-1">
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold tracking-tight">{workflow.name}</h1>
+            <button
+              onClick={() => openConfirm("delete")}
+              className="p-1.5 rounded-md text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+              title="Delete Workflow"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"/>
+              </svg>
+            </button>
+          </div>
+          <div className="flex items-center gap-3 mt-2">
+            {workflow.status === 'paused' && (
+              <>
+                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                  PAUSED
+                </span>
+                <span className="text-sm text-muted">•</span>
+              </>
+            )}
             <span className="text-sm text-muted">Version {workflow.currentVersion}</span>
             <span className="text-sm text-muted">•</span>
             <span className="text-sm text-muted">{workflow.createdAt ? timeAgo(workflow.createdAt) : ""}</span>
           </div>
         </div>
-        <button
-          onClick={handleTrigger}
-          disabled={triggering}
-          className="px-5 py-2.5 rounded-lg bg-emerald-600 text-white font-medium text-sm hover:bg-emerald-500 transition-all glow-success disabled:opacity-50"
-        >
-          {triggering ? "Triggering..." : "▶ Run Now"}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => workflow.status === 'paused' ? openConfirm("resume") : openConfirm("pause")}
+            className={`px-4 py-2.5 rounded-lg font-medium text-sm border transition-all ${
+              workflow.status === 'paused'
+                ? 'text-emerald-400 hover:bg-emerald-500/10 border-emerald-500/20 hover:border-emerald-500/40'
+                : 'text-amber-400 hover:bg-amber-500/10 border-amber-500/20 hover:border-amber-500/40'
+            }`}
+          >
+            {workflow.status === 'paused' ? 'Resume' : 'Pause'}
+          </button>
+          <button
+            onClick={handleTrigger}
+            disabled={triggering || workflow.status === 'paused'}
+            className="px-5 py-2.5 rounded-lg bg-emerald-600 text-white font-medium text-sm hover:bg-emerald-500 transition-all glow-success disabled:opacity-50"
+            title={workflow.status === 'paused' ? "Cannot trigger a paused workflow" : ""}
+          >
+            {triggering ? "Triggering..." : "▶ Run Now"}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

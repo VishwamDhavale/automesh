@@ -26,6 +26,7 @@ const AVAILABLE_ACTIONS = [
   { label: "Send Email", value: "send_email", icon: "📧" },
   { label: "Create Contact", value: "create_contact", icon: "👤" },
   { label: "Notify Slack", value: "notify_slack", icon: "💬" },
+  { label: "Run MCP Tool", value: "run_mcp_tool", icon: "🤖" },
 ];
 
 export default function BuilderPage() {

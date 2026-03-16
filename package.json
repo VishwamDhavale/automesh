@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "pnpm --filter @automesh/dashboard dev & pnpm --filter @automesh/api dev",
+    "dev": "pnpm --filter @automesh/dashboard dev & pnpm --filter @automesh/api dev & pnpm webhooks",
     "dev:dashboard": "pnpm --filter @automesh/dashboard dev",
     "dev:api": "pnpm --filter @automesh/api dev",
     "build": "pnpm -r build",
