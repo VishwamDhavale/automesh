@@ -43,13 +43,14 @@ const TOOLS: Groq.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'deploy_workflow',
-      description: 'Deploy a validated workflow YAML to make it active. Only call this after validating and when the user confirms deployment.',
+      description: 'Deploy a validated workflow YAML to make it active. ONLY call this AFTER: (1) the user EXPLICITLY says "yes", "deploy", "go ahead", or similar confirmation, AND (2) you have already called check_integrations and verified all required integrations are configured. NEVER call this automatically.',
       parameters: {
         type: 'object',
         properties: {
           yaml: { type: 'string', description: 'The validated workflow YAML to deploy' },
+          confirmed: { type: 'boolean', description: 'Must be true. Set to true ONLY if the user has explicitly confirmed deployment in their message.' },
         },
-        required: ['yaml'],
+        required: ['yaml', 'confirmed'],
       },
     },
   },
@@ -63,7 +64,31 @@ Your capabilities:
 1. **Check integrations** - Before generating a workflow, ALWAYS check what integrations are configured using the check_integrations tool.
 2. **Generate workflows** - Design workflows in Automesh YAML DSL based on user requirements.
 3. **Validate** - Validate the YAML before deploying using the validate_workflow tool.
-4. **Deploy** - Deploy workflows when the user confirms using the deploy_workflow tool.
+4. **Deploy** - Deploy workflows ONLY when the user explicitly confirms.
+
+## MANDATORY WORKFLOW (follow this order EVERY TIME):
+
+### Step 1: CHECK INTEGRATIONS FIRST
+Before generating ANY workflow, call check_integrations to see what is configured.
+If the workflow requires an integration that is NOT configured, STOP and tell the user:
+"⚠️ This workflow requires [provider] integration, but it's not configured yet. Please go to Settings to set it up first."
+Do NOT generate or offer to deploy a workflow with missing integrations.
+
+### Step 2: GENERATE AND SHOW THE YAML
+After confirming integrations are ready, generate the workflow YAML and show it to the user in a code block. Explain what each step does.
+
+### Step 3: VALIDATE THE YAML
+Call validate_workflow to verify the YAML parses correctly.
+
+### Step 4: ASK FOR EXPLICIT CONFIRMATION
+After showing and validating the workflow, ASK the user: "Would you like me to deploy this workflow?"
+Wait for the user to respond with an explicit confirmation like "yes", "deploy it", "go ahead", etc.
+
+### Step 5: DEPLOY ONLY AFTER CONFIRMATION
+Only call deploy_workflow AFTER the user has explicitly confirmed in a SEPARATE message.
+⛔ NEVER deploy in the same turn where you show the workflow for the first time.
+⛔ NEVER auto-deploy just because the user described what they want.
+⛔ The user saying "I want X" is NOT confirmation to deploy. It is a request to DESIGN a workflow.
 
 The Automesh YAML DSL format:
 \`\`\`yaml
@@ -112,15 +137,7 @@ VALID SLACK EVENTS (slack.<event>):
 message, reaction_added, pin_added, channel_created, member_joined_channel.
 
 VALID RESEND EVENTS (resend.<event>):
-email.sent, email.delivered, email.bounced, email.complained, email.opened, email.clicked.
-
-CRITICAL RULES:
-- ALWAYS call check_integrations FIRST before generating any workflow that uses integrations.
-- If a required integration is NOT configured, tell the user they need to set it up in Settings first. Don't offer to deploy broken workflows.
-- When showing YAML, present it in a code block for readability.
-- After generating YAML, call validate_workflow to verify it parses correctly.
-- Only call deploy_workflow after the user explicitly confirms they want to deploy.
-- Be conversational and helpful. Explain what each workflow does.`;
+email.sent, email.delivered, email.bounced, email.complained, email.opened, email.clicked.`;
 
 // ─── Tool Execution ─────────────────────────────────────────────
 
@@ -186,8 +203,48 @@ async function executeTool(name: string, args: Record<string, unknown>, userId: 
 
     case 'deploy_workflow': {
       const yaml = args.yaml as string;
+      const confirmed = args.confirmed as boolean;
+
+      // Guard: require explicit confirmation flag
+      if (!confirmed) {
+        return JSON.stringify({
+          success: false,
+          error: 'Deployment blocked: you must ask the user for explicit confirmation before deploying. Set confirmed=true only after the user says "yes" or "deploy".',
+        });
+      }
+
       try {
         const definition = parseWorkflow(yaml);
+
+        // Guard: check required integrations are configured
+        const requiredProviders: string[] = [];
+        if (definition.trigger?.event) {
+          const provider = definition.trigger.event.split('.')[0];
+          if (provider) requiredProviders.push(provider);
+        }
+        for (const step of definition.steps ?? []) {
+          if (step.action === 'send_email') requiredProviders.push('resend');
+          if (step.action === 'notify_slack') requiredProviders.push('slack');
+        }
+
+        const uniqueProviders = [...new Set(requiredProviders)];
+        if (uniqueProviders.length > 0) {
+          const integrations = await db
+            .select()
+            .from(schema.integrations)
+            .where(eq(schema.integrations.userId, userId));
+          const configuredProviders = integrations.map(i => i.provider);
+          const missing = uniqueProviders.filter(p => !configuredProviders.includes(p));
+
+          if (missing.length > 0) {
+            return JSON.stringify({
+              success: false,
+              error: `Deployment blocked: the following integrations are required but not configured: ${missing.join(', ')}. Please ask the user to configure them in Settings first.`,
+              missing_integrations: missing,
+            });
+          }
+        }
+
         const id = `wf_${nanoid()}`;
         const versionId = `wfv_${nanoid()}`;
         const name = definition.workflow;

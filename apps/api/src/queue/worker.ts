@@ -6,6 +6,29 @@ import { db, schema } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import type { WorkflowDefinition, PluginContext, PluginResult } from '@automesh/shared-types';
+import { decrypt } from '../utils/crypto.js';
+
+// Helper: decrypt a config object (same as integrations route)
+function decryptConfig(config: Record<string, string>): Record<string, string> {
+  const decrypted: Record<string, string> = {};
+  for (const [key, value] of Object.entries(config)) {
+    if (value && value.startsWith('enc:')) {
+      const parts = value.split(':');
+      if (parts.length === 4) {
+        try {
+          decrypted[key] = decrypt(parts[3], parts[1], parts[2]);
+        } catch {
+          decrypted[key] = value;
+        }
+      } else {
+        decrypted[key] = value;
+      }
+    } else {
+      decrypted[key] = value; // not encrypted (legacy)
+    }
+  }
+  return decrypted;
+}
 
 // ─── Logger for plugins ─────────────────────────────────────────
 
@@ -38,12 +61,12 @@ async function processWorkflowJob(job: Job<WorkflowJobData>) {
       stepActionMap.set(stepId, s.action);
     });
 
-    // Fetch integrations from database
+    // Fetch integrations from database and decrypt configs
     const integrationsList = await db.select().from(schema.integrations);
     const integrations: Record<string, Record<string, string>> = {};
     for (const intg of integrationsList) {
       if (intg.config) {
-        integrations[intg.provider] = intg.config as Record<string, string>;
+        integrations[intg.provider] = decryptConfig(intg.config as Record<string, string>);
       }
     }
 

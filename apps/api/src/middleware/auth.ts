@@ -14,7 +14,9 @@ export interface JwtPayload {
 }
 
 
-export async function authMiddleware(app: FastifyInstance) {
+import fp from 'fastify-plugin';
+
+export const authMiddleware = fp(async (app: FastifyInstance) => {
   app.decorate('authenticate', async (request: FastifyRequest, reply: FastifyReply) => {
     const authHeader = request.headers.authorization;
 
@@ -31,7 +33,7 @@ export async function authMiddleware(app: FastifyInstance) {
       return reply.status(401).send({ error: 'Invalid or expired token' });
     }
   });
-}
+});
 
 // Helper to generate tokens (for dev/testing)
 export function generateToken(userId: string, email: string): string {

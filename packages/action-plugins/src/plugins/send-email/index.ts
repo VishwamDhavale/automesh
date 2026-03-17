@@ -16,7 +16,11 @@ export async function run(
   const to = params.to as string;
   const subject = params.subject as string;
   const body = params.body as string;
-  const from = (params.from as string) ?? 'noreply@automesh.dev';
+  // Use from in this priority: workflow param > integration config > fallback
+  const configuredFrom = context.integrations?.resend?.fromName
+    ? `${context.integrations.resend.fromName} <${context.integrations.resend.fromEmail}>`
+    : context.integrations?.resend?.fromEmail;
+  const from = (params.from as string) ?? configuredFrom ?? 'noreply@automesh.dev';
 
   if (!to || !subject) {
     return {

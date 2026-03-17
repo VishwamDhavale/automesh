@@ -66,6 +66,21 @@ export const INTEGRATIONS_REGISTRY: Record<string, IntegrationDefinition> = {
         placeholder: 're_...',
         required: true,
       },
+      {
+        key: 'fromEmail',
+        label: 'From Email Address',
+        type: 'text',
+        placeholder: 'notifications@yourdomain.com',
+        description: 'The verified sender email address. Must be on a domain you\'ve verified in Resend.',
+        required: true,
+      },
+      {
+        key: 'fromName',
+        label: 'From Name',
+        type: 'text',
+        placeholder: 'Automesh',
+        description: 'Display name that appears in the "From" field of sent emails.',
+      },
     ],
     guide: {
       stepByStep: [

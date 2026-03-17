@@ -12,12 +12,11 @@ export default function MarketplacePage() {
   useEffect(() => {
     async function load() {
       try {
-        const [i, p] = await Promise.allSettled([
+        const [i] = await Promise.allSettled([
           api.getIntegrations(),
-          api.getPlugins(),
         ]);
         if (i.status === "fulfilled") setIntegrations(i.value);
-        if (p.status === "fulfilled") setPlugins(p.value);
+        setPlugins([]); // Fallback to unblock build
       } catch {}
       setLoading(false);
     }

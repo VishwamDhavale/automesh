@@ -5,24 +5,55 @@ import { desc, eq, and, inArray } from 'drizzle-orm';
 import { getAdapter } from '@automesh/integrations';
 import type { EventRouter } from '@automesh/workflow-engine';
 import { workflowQueue } from '../queue/queue.js';
+import { decrypt } from '../utils/crypto.js';
+
+// Helper: decrypt a config object
+function decryptConfig(config: Record<string, string>): Record<string, string> {
+  const decrypted: Record<string, string> = {};
+  for (const [key, value] of Object.entries(config)) {
+    if (value && value.startsWith('enc:')) {
+      const parts = value.split(':');
+      if (parts.length === 4) {
+        try {
+          decrypted[key] = decrypt(parts[3], parts[1], parts[2]);
+        } catch {
+          decrypted[key] = value;
+        }
+      } else {
+        decrypted[key] = value;
+      }
+    } else {
+      decrypted[key] = value;
+    }
+  }
+  return decrypted;
+}
 
 export async function webhookRoutes(app: FastifyInstance, eventRouter?: EventRouter) {
   // Webhook ingestion endpoint
-  // POST /api/webhooks/:integrationId
-  app.post('/api/webhooks/:integrationId', {
+  // POST /api/webhooks/:provider — accepts provider name (e.g. "github") or integration ID
+  app.post('/api/webhooks/:provider', {
     config: {
       rawBody: true,
     },
   }, async (request, reply) => {
-    const { integrationId } = request.params as { integrationId: string };
+    const { provider: providerOrId } = request.params as { provider: string };
     
-    const [integration] = await db
+    // Try to find integration by ID first, then by provider name
+    let [integration] = await db
       .select()
       .from(schema.integrations)
-      .where(eq(schema.integrations.id, integrationId));
+      .where(eq(schema.integrations.id, providerOrId));
 
     if (!integration) {
-      return reply.status(404).send({ error: 'Integration not found' });
+      [integration] = await db
+        .select()
+        .from(schema.integrations)
+        .where(eq(schema.integrations.provider, providerOrId));
+    }
+
+    if (!integration) {
+      return reply.status(404).send({ error: `Integration not found for "${providerOrId}". Please configure the ${providerOrId} integration in Settings first.` });
     }
 
     const provider = integration.provider;
@@ -40,7 +71,7 @@ export async function webhookRoutes(app: FastifyInstance, eventRouter?: EventRou
     let secret: string | undefined;
 
     if (integration.config) {
-      const config = integration.config as Record<string, string>;
+      const config = decryptConfig(integration.config as Record<string, string>);
       
       if (provider === 'github') secret = config.webhookSecret;
       else if (provider === 'stripe') secret = config.webhookSecret;

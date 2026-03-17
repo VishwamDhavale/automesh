@@ -3,6 +3,41 @@ import { db, schema } from '../db/index.js';
 import { eq, and } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { INTEGRATIONS_REGISTRY } from '@automesh/shared-types';
+import { encrypt, decrypt } from '../utils/crypto.js';
+
+// Helper: encrypt a config object
+function encryptConfig(config: Record<string, string>): Record<string, string> {
+  const encrypted: Record<string, string> = {};
+  for (const [key, value] of Object.entries(config)) {
+    if (value) {
+      const { encrypted: enc, iv, authTag } = encrypt(value);
+      encrypted[key] = `enc:${iv}:${authTag}:${enc}`;
+    }
+  }
+  return encrypted;
+}
+
+// Helper: decrypt a config object
+function decryptConfig(config: Record<string, string>): Record<string, string> {
+  const decrypted: Record<string, string> = {};
+  for (const [key, value] of Object.entries(config)) {
+    if (value && value.startsWith('enc:')) {
+      const parts = value.split(':');
+      if (parts.length === 4) {
+        try {
+          decrypted[key] = decrypt(parts[3], parts[1], parts[2]);
+        } catch {
+          decrypted[key] = value; // fallback if decryption fails
+        }
+      } else {
+        decrypted[key] = value;
+      }
+    } else {
+      decrypted[key] = value; // not encrypted (legacy), keep as-is
+    }
+  }
+  return decrypted;
+}
 
 export async function integrationsRoutes(app: FastifyInstance) {
   // Get all configured integrations
@@ -18,7 +53,8 @@ export async function integrationsRoutes(app: FastifyInstance) {
       const maskedConfig: Record<string, string> = {};
       
       if (d.config && typeof d.config === 'object') {
-        const configObj = d.config as Record<string, string>;
+        // Decrypt stored config first
+        const configObj = decryptConfig(d.config as Record<string, string>);
         
         // Find the definition to know which fields are passwords
         const def = INTEGRATIONS_REGISTRY[d.provider];
@@ -67,7 +103,7 @@ export async function integrationsRoutes(app: FastifyInstance) {
 
     if (existing) {
       // Merge new config. If a field comes in as '********', keep the old value.
-      const currentConfig = (existing.config as Record<string, string>) || {};
+      const currentConfig = decryptConfig((existing.config as Record<string, string>) || {});
       const newConfig = { ...currentConfig };
 
       for (const [k, v] of Object.entries(body.config)) {
@@ -79,7 +115,7 @@ export async function integrationsRoutes(app: FastifyInstance) {
       await db
         .update(schema.integrations)
         .set({
-          config: newConfig,
+          config: encryptConfig(newConfig),
           updatedAt: new Date(),
         } as any)
         .where(and(eq(schema.integrations.provider, body.provider), eq(schema.integrations.userId, user.sub)));
@@ -92,7 +128,7 @@ export async function integrationsRoutes(app: FastifyInstance) {
         id,
         userId: user.sub,
         provider: body.provider,
-        config: body.config,
+        config: encryptConfig(body.config),
       });
 
       return reply.status(201).send({ success: true, id });

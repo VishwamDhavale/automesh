@@ -13,7 +13,8 @@ import { webhookRoutes } from './routes/webhooks.js';
 import { aiRoutes } from './routes/ai.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
 import { integrationsRoutes } from './routes/integrations.js';
-// authRoutes removed (SEC-01)
+import { authMiddleware } from './middleware/auth.js';
+import { authRoutes } from './routes/auth.js';
 import { startWorker } from './queue/worker.js';
 import { EventRouter } from '@automesh/workflow-engine';
 import { db, schema } from './db/index.js';
@@ -77,7 +78,8 @@ async function start() {
   app.log.info(`📡 EventRouter loaded ${eventRouter.size} event-triggered workflow(s)`);
 
   // Register routes
-  // Removed insecure authRoutes (SEC-01)
+  await app.register(authMiddleware);
+  await app.register(authRoutes);
   await app.register(async (instance) => workflowRoutes(instance, eventRouter));
   await app.register(runRoutes);
   await app.register(eventRoutes);
