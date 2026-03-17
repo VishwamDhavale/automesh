@@ -1,6 +1,9 @@
 {
   "name": "automesh",
   "version": "0.1.0",
+  "description": "An event-driven AI Workflow Engine featuring a visual builder, AI generation, and extensive tool integrations.",
+  "author": "Vishwam Dhavale",
+  "license": "Apache-2.0",
   "private": true,
   "scripts": {
     "dev": "pnpm --filter @automesh/dashboard dev & pnpm --filter @automesh/api dev & pnpm webhooks",
