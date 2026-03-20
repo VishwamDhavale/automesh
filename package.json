@@ -16,7 +16,8 @@
     "db:generate": "pnpm --filter @automesh/api db:generate",
     "webhooks": "pnpm --filter @automesh/api webhooks",
     "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down"
+    "docker:down": "docker compose down",
+    "docker:infra": "docker compose up -d postgres redis"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

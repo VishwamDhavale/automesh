@@ -22,6 +22,13 @@
       "when": 1773760134551,
       "tag": "0002_tiny_oracle",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1773990022376,
+      "tag": "0003_colossal_magdalene",
+      "breakpoints": true
     }
   ]
 }

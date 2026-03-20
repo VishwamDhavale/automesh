@@ -1,5 +1,16 @@
 import { pgTable, text, timestamp, jsonb, serial, integer, varchar } from 'drizzle-orm/pg-core';
 
+// ─── Users ──────────────────────────────────────────────────────
+
+export const users = pgTable('users', {
+  id: text('id').primaryKey(),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  name: varchar('name', { length: 255 }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 // ─── Workflows ──────────────────────────────────────────────────
 
 export const workflows = pgTable('workflows', {

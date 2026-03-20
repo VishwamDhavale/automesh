@@ -1,7 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -17,6 +18,31 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("automesh_user");
+      if (raw) {
+        const user = JSON.parse(raw);
+        setUserEmail(user.email ?? null);
+      }
+    } catch {}
+  }, []);
+
+  function handleLogout() {
+    localStorage.removeItem("automesh_token");
+    localStorage.removeItem("automesh_user");
+    router.push("/login");
+  }
+
+  const initials = userEmail ? userEmail.charAt(0).toUpperCase() : "?";
+  const displayEmail = userEmail
+    ? userEmail.length > 20
+      ? userEmail.slice(0, 18) + "…"
+      : userEmail
+    : "Not signed in";
 
   return (
     <aside className="w-64 border-r border-border bg-surface flex flex-col h-full shrink-0">
@@ -58,13 +84,29 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="p-4 border-t border-border">
-        <div className="glass rounded-lg p-3">
-          <div className="flex items-center gap-2 mb-1.5">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse-glow" />
-            <span className="text-xs font-medium text-emerald-400">System online</span>
+      <div className="p-3 border-t border-border space-y-2">
+        {/* System status */}
+        <div className="flex items-center gap-2 px-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-glow" />
+          <span className="text-[11px] text-muted">v0.1.0</span>
+        </div>
+
+        {/* User account */}
+        <div className="glass rounded-lg p-2.5 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shrink-0 text-white text-sm font-semibold">
+            {initials}
           </div>
-          <p className="text-xs text-muted">v0.1.0</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground truncate">{displayEmail}</p>
+            <p className="text-[11px] text-muted">Signed in</p>
+          </div>
+          <button
+            onClick={handleLogout}
+            title="Sign out"
+            className="p-1.5 rounded-md text-muted hover:text-red-400 hover:bg-red-500/10 transition-all duration-200 cursor-pointer"
+          >
+            <LogoutIcon className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </aside>
@@ -150,6 +192,16 @@ function SparklesIcon({ className }: { className?: string }) {
       <path d="M12 3l1.912 5.813a2 2 0 001.272 1.278L21 12l-5.816 1.91a2 2 0 00-1.272 1.278L12 21l-1.912-5.813a2 2 0 00-1.272-1.278L3 12l5.816-1.91a2 2 0 001.272-1.278L12 3z" />
       <path d="M5 3v4" /><path d="M3 5h4" />
       <path d="M19 17v4" /><path d="M17 19h4" />
+    </svg>
+  );
+}
+
+function LogoutIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
     </svg>
   );
 }

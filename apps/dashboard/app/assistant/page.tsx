@@ -10,6 +10,77 @@ interface ChatMessage {
   content: string;
 }
 
+function EditableYamlBlock({ lang, initialCode }: { lang: string; initialCode: string }) {
+  const [code, setCode] = useState(initialCode);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isDeploying, setIsDeploying] = useState(false);
+  const [deploySuccess, setDeploySuccess] = useState(false);
+  const [deployError, setDeployError] = useState<string | null>(null);
+
+  const handleDeploy = async () => {
+    try {
+      setIsDeploying(true);
+      setDeployError(null);
+      await api.createWorkflow(code);
+      setDeploySuccess(true);
+    } catch (err: any) {
+      setDeployError(err.message || "Failed to deploy");
+    } finally {
+      setIsDeploying(false);
+    }
+  };
+
+  return (
+    <div className="my-3">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] font-medium text-muted uppercase tracking-wider">{lang}</span>
+        <div className="flex gap-3">
+          {lang === "yaml" && (
+            <button
+              onClick={() => setIsEditing(!isEditing)}
+              className="text-[10px] font-medium px-2 py-0.5 rounded bg-surface border border-border text-foreground hover:bg-surface-hover transition-colors"
+            >
+              {isEditing ? "Done Editing" : "Edit YAML"}
+            </button>
+          )}
+          <button
+            onClick={() => navigator.clipboard.writeText(code)}
+            className="text-[10px] text-muted hover:text-foreground transition-colors py-0.5"
+          >
+            Copy
+          </button>
+        </div>
+      </div>
+      
+      {isEditing ? (
+        <textarea
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          className="w-full text-xs font-mono bg-background rounded-xl p-4 border border-accent/50 focus:outline-none focus:border-accent min-h-[200px]"
+          spellCheck={false}
+        />
+      ) : (
+        <pre className="text-xs font-mono bg-background rounded-xl p-4 border border-border overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-80 overflow-y-auto">
+          {code}
+        </pre>
+      )}
+
+      {lang === "yaml" && (
+        <div className="mt-3 flex flex-col items-start gap-2">
+          <button
+            onClick={handleDeploy}
+            disabled={isDeploying || deploySuccess}
+            className="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent-bright disabled:opacity-50 transition-colors"
+          >
+            {isDeploying ? "Deploying..." : deploySuccess ? "Deployed Successfully!" : "Deploy This Workflow"}
+          </button>
+          {deployError && <span className="text-[10px] text-rose-500 bg-rose-500/10 px-2 py-1 rounded">{deployError}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AssistantPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -135,20 +206,7 @@ export default function AssistantPage() {
         const lang = codeMatch[1] || "yaml";
         const code = codeMatch[2].trim();
         return (
-          <div key={i} className="my-3">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] font-medium text-muted uppercase tracking-wider">{lang}</span>
-              <button
-                onClick={() => navigator.clipboard.writeText(code)}
-                className="text-[10px] text-muted hover:text-foreground transition-colors"
-              >
-                Copy
-              </button>
-            </div>
-            <pre className="text-xs font-mono bg-background rounded-xl p-4 border border-border overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-80 overflow-y-auto">
-              {code}
-            </pre>
-          </div>
+          <EditableYamlBlock key={i} lang={lang} initialCode={code} />
         );
       }
 

@@ -44,5 +44,13 @@ export async function sendResendEmail(
     body: JSON.stringify(params),
   });
 
-  return response.json() as Promise<{ id?: string; error?: string }>;
+  const data = await response.json() as Record<string, unknown>;
+
+  if (!response.ok) {
+    // Resend error responses may use `message` or `error` field
+    const errorMsg = (data.message ?? data.error ?? `HTTP ${response.status}: ${response.statusText}`) as string;
+    return { error: errorMsg };
+  }
+
+  return { id: data.id as string };
 }

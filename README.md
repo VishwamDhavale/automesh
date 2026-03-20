@@ -44,8 +44,9 @@ This project is structured as a monorepo using `pnpm` workspaces:
 3. **Set up the database and message broker:**
    The easiest way is to use the provided `docker-compose.yml`.
    ```bash
-   pnpm docker:up
+   pnpm docker:infra
    ```
+   *(Note: This starts only the essential databases. Use `pnpm docker:up` if you want to run the full application in Docker.)*
 
 4. **Environment Variables:**
    Copy the example environment files for both the API and Dashboard and update them:

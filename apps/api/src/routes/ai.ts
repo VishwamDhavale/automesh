@@ -6,6 +6,15 @@ import { eq, asc, and } from 'drizzle-orm';
 import { encrypt, decrypt } from '../utils/crypto.js';
 import { parseWorkflow } from '@automesh/workflow-engine';
 
+// ─── Constants & Fallback Models ────────────────────────────────
+
+const FALLBACK_MODELS = [
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+  'mixtral-8x7b-32768',
+  'gemma2-9b-it'
+];
+
 // ─── Tool Definitions for Groq ──────────────────────────────────
 
 const TOOLS: Groq.Chat.Completions.ChatCompletionTool[] = [
@@ -74,17 +83,23 @@ If the workflow requires an integration that is NOT configured, STOP and tell th
 "⚠️ This workflow requires [provider] integration, but it's not configured yet. Please go to Settings to set it up first."
 Do NOT generate or offer to deploy a workflow with missing integrations.
 
-### Step 2: GENERATE AND SHOW THE YAML
-After confirming integrations are ready, generate the workflow YAML and show it to the user in a code block. Explain what each step does.
+### Step 2: GATHER REQUIRED PARAMETERS
+Plugins have required inputs (e.g., \`notify_slack\` requires a \`channel\`, \`send_email\` requires a \`to\` address).
+If the user did not give you this information in their prompt, DO NOT generate mock data or placeholders like "your_slack_channel".
+Instead, STOP and ASK the user for the specific missing information (e.g., "Which Slack channel should I send this to?").
 
-### Step 3: VALIDATE THE YAML
+### Step 3: GENERATE AND SHOW THE YAML
+After confirming integrations are ready and ALL required parameters are known, you MUST generate the workflow YAML and show it to the user in a code block. 
+⚠️ CRITICAL: DO NOT just ask if they want to deploy it. You MUST output the full YAML code block in your message so they can see it and edit it. Explain what each step does.
+
+### Step 4: VALIDATE THE YAML
 Call validate_workflow to verify the YAML parses correctly.
 
-### Step 4: ASK FOR EXPLICIT CONFIRMATION
+### Step 5: ASK FOR EXPLICIT CONFIRMATION
 After showing and validating the workflow, ASK the user: "Would you like me to deploy this workflow?"
 Wait for the user to respond with an explicit confirmation like "yes", "deploy it", "go ahead", etc.
 
-### Step 5: DEPLOY ONLY AFTER CONFIRMATION
+### Step 6: DEPLOY ONLY AFTER CONFIRMATION
 Only call deploy_workflow AFTER the user has explicitly confirmed in a SEPARATE message.
 ⛔ NEVER deploy in the same turn where you show the workflow for the first time.
 ⛔ NEVER auto-deploy just because the user described what they want.
@@ -122,6 +137,11 @@ steps:
       attempts: 3
       delay: "10s"
 \`\`\`
+
+IMPORTANT RULES FOR send_email:
+- The \`send_email\` action ONLY requires \`to\`, \`subject\`, and \`body\`.
+- ABSOLUTELY DO NOT include a \`from\` field in the YAML unless the user explicitly provided an actual email address to send from. 
+- NEVER generate placeholder values for the \`from\` field (e.g. your_email@example.com, your_resend_from_email). It will break the workflow! Omit the field entirely instead.
 
 CRITICAL RULE: WEBHOOK PAYLOADS
 When evaluating \`conditions\` or interpolating \`input\` from a webhook trigger, the raw payload is ALWAYS wrapped inside an \`event.data\` object.
@@ -170,7 +190,7 @@ async function executeTool(name: string, args: Record<string, unknown>, userId: 
     case 'list_available_plugins': {
       return JSON.stringify({
         actions: [
-          { name: 'send_email', inputs: ['to', 'subject', 'body', 'from'], requires: 'resend' },
+          { name: 'send_email', inputs: ['to', 'subject', 'body'], optionalInputs: ['from'], requires: 'resend' },
           { name: 'create_contact', inputs: ['email', 'name', 'phone', 'company'], requires: null },
           { name: 'notify_slack', inputs: ['channel', 'message'], requires: 'slack' },
         ],
@@ -365,16 +385,32 @@ export async function aiRoutes(app: FastifyInstance) {
     // Agent loop: keep calling until no more tool calls
     let maxIterations = 10;
     let finalContent = '';
+    let currentModelIndex = 0;
+    let successfulModel = FALLBACK_MODELS[0];
 
     while (maxIterations-- > 0) {
-      const completion = await groq.chat.completions.create({
-        messages,
-        model: 'llama-3.3-70b-versatile',
-        tools: TOOLS,
-        tool_choice: 'auto',
-        temperature: 0.3,
-        max_tokens: 2048,
-      });
+      let completion;
+      const modelToUse = FALLBACK_MODELS[currentModelIndex];
+
+      try {
+        completion = await groq.chat.completions.create({
+          messages,
+          model: modelToUse,
+          tools: TOOLS,
+          tool_choice: 'auto',
+          temperature: 0.3,
+          max_tokens: 2048,
+        });
+        successfulModel = modelToUse;
+      } catch (err: any) {
+        if (err?.status === 429 && currentModelIndex < FALLBACK_MODELS.length - 1) {
+          console.warn(`[AI] Rate limit hit for ${modelToUse}. Falling back to ${FALLBACK_MODELS[currentModelIndex + 1]}...`);
+          currentModelIndex++;
+          maxIterations++; // Don't penalize tool call iterations for a retry
+          continue;
+        }
+        throw err;
+      }
 
       const choice = completion.choices[0];
       const responseMessage = choice.message;
@@ -411,7 +447,7 @@ export async function aiRoutes(app: FastifyInstance) {
     return reply.send({
       sessionId,
       message: finalContent,
-      model: 'llama-3.3-70b-versatile',
+      model: successfulModel,
     });
   });
 
@@ -433,22 +469,40 @@ export async function aiRoutes(app: FastifyInstance) {
     try {
       const groq = new Groq({ apiKey });
 
-      const completion = await groq.chat.completions.create({
-        messages: [
-          { role: 'system', content: 'You are an expert workflow automation designer. Generate ONLY raw YAML (no markdown fences, no explanation). Use the Automesh DSL format.' },
-          { role: 'user', content: prompt },
-        ],
-        model: 'llama-3.3-70b-versatile',
-        temperature: 0.3,
-        max_tokens: 1024,
-      });
+      let completion;
+      let currentModelIndex = 0;
+      let successfulModel = FALLBACK_MODELS[0];
+      
+      while (currentModelIndex < FALLBACK_MODELS.length) {
+        const modelToUse = FALLBACK_MODELS[currentModelIndex];
+        try {
+          completion = await groq.chat.completions.create({
+            messages: [
+              { role: 'system', content: 'You are an expert workflow automation designer. Generate ONLY raw YAML (no markdown fences, no explanation). Use the Automesh DSL format.' },
+              { role: 'user', content: prompt },
+            ],
+            model: modelToUse,
+            temperature: 0.3,
+            max_tokens: 1024,
+          });
+          successfulModel = modelToUse;
+          break; // success
+        } catch (err: any) {
+          if (err?.status === 429 && currentModelIndex < FALLBACK_MODELS.length - 1) {
+            console.warn(`[AI] Rate limit hit for ${modelToUse} in generate endpoint. Falling back...`);
+            currentModelIndex++;
+            continue;
+          }
+          throw err;
+        }
+      }
 
-      const yaml = completion.choices[0]?.message?.content ?? '';
+      const yaml = completion?.choices[0]?.message?.content ?? '';
 
       return reply.send({
         yaml: yaml.trim(),
-        model: completion.model,
-        usage: completion.usage,
+        model: successfulModel,
+        usage: completion?.usage,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
